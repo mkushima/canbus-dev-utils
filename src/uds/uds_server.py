@@ -2,7 +2,13 @@
 
 import isotp
 
+from logger import MyLogger
 from uds.uds_common import ServiceID
+
+
+# Logger setup
+logger = MyLogger(__name__)
+
 
 class UDSServer:
     dummy_data = {
@@ -55,12 +61,12 @@ class UDSServer:
         did = UDSServer.get_did(req)
 
         if did not in self.dummy_data:
-            print(f'[ERROR] Sending Negative Response - SID: 0x22 - DID {hex(did)} not found')
+            logger.error(f'Sending Negative Response - SID: 0x22 - DID {hex(did)} not found')
             # TODO: Sending the proper NRC
             self.send_negative_response(rej_sid=req[0])
             return
 
-        print(f'SID: 0x22 - Sending DID {hex(did)} content')
+        logger.info(f'SID: 0x22 - Sending DID {hex(did)} content')
         self.server.send(
             b'\x62' +
             did.to_bytes(length=2, byteorder='big') +
@@ -71,12 +77,12 @@ class UDSServer:
         did = UDSServer.get_did(req)
 
         if did not in self.dummy_data:
-            print(f'[ERROR] Sending Negative Response - SID: 0x2E - DID {hex(did)} not found')
+            logger.error(f'Sending Negative Response - SID: 0x2E - DID {hex(did)} not found')
             # TODO: Sending the proper NRC
             self.send_negative_response(rej_sid=req[0])
             return
 
-        print(f'SID: 0x2E - Updating DID {hex(did)}')
+        logger.info(f'SID: 0x2E - Updating DID {hex(did)}')
         self.dummy_data[did] = req[3:]
 
         # TODO: Check if this is the correct payload format
@@ -96,12 +102,12 @@ class UDSServer:
         try:
             sid = ServiceID(req[0])
         except ValueError:
-            print(f'[ERROR] Sending Negative Response - Unknown SID: {hex(req[0])}')
+            logger.error(f'Sending Negative Response - Unknown SID: {hex(req[0])}')
             self.send_negative_response(req[0])
             return
 
         if sid not in self.service_handlers:
-            print(f'[ERROR] Sending Negative Response - No handler found for SID: {hex(sid.value)}')
+            logger.error(f'Sending Negative Response - No handler found for SID: {hex(sid.value)}')
             self.send_negative_response(sid.value)
             return
 

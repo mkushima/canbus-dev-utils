@@ -3,11 +3,17 @@
 import argparse
 import can
 import isotp
+import os
 import udsoncan
 
+from logger import MyLogger
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.client import Client
 from udsoncan.configs import default_client_config
+
+
+# Logger setup
+logger = MyLogger(os.path.basename(__file__))
 
 
 def get_args():
@@ -96,7 +102,7 @@ def main():
 
     with Client(conn, request_timeout=2, config=config) as client:
         resp = client.read_data_by_identifier([0xF190])
-        print(resp.service_data.values)
+        logger.info(resp.service_data.values)
 
     bus.shutdown()
 

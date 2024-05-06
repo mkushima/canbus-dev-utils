@@ -122,7 +122,7 @@ setup(
     install_requires=[
         "can-isotp==2.0.4",
         "udsoncan==1.23.0",
-        "python-can=4.3.1",
+        "python-can==4.3.1",
     ],  # Optional
     # List additional groups of dependencies here (e.g. development
     # dependencies). Users will be able to install these using the "extras"
@@ -143,12 +143,10 @@ setup(
     # },
     # Entry points. The following would provide a command called `sample` which
     # executes the function `main` from this package when invoked:
-    entry_points={  # Optional
-        "console_scripts": [
-            "uds_server=uds_server:main",
-            "uds_client=uds_client:main",
-        ],
-    },
+    scripts=[
+        "bin/uds-server",
+        "bin/uds-client",
+    ],
     # List additional URLs that are relevant to your project as a dict.
     #
     # This field corresponds to the "Project-URL" metadata fields:

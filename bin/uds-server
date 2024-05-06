@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+import argparse
+import signal
+import threading
+import time
+
+from uds.uds_server import UDSServer
+
+exit_flag = threading.Event()
+
+
+def signal_handler(sig, _frame):
+    print(f'Received signal: {sig}. Stopping UDS Server...')
+    exit_flag.set()
+
+
+def get_args():
+    def hex_int(value):
+        try:
+            return int(value, 16)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"'{value}' is not a valid hexadecimal integer")
+
+    parser = argparse.ArgumentParser(
+        prog='uds-server',
+        description='UDS Server application'
+    )
+
+    parser.add_argument(
+        "-ch", "--can_channel",
+        help="CAN channel interface",
+        required=True,
+        type=str
+    )
+
+    parser.add_argument(
+        "--rx_id",
+        help="ID used for reception (in HEX)",
+        required=True,
+        type=hex_int
+    )
+
+    parser.add_argument(
+        "--tx_id",
+        help="ID used for transmission (in HEX)",
+        required=True,
+        type=hex_int
+    )
+
+    parser.add_argument(
+        "-fd", "--fd_mode",
+        help="Enable FD mode",
+        action='store_true'
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    args = get_args()
+
+    can_channel = args.can_channel
+    rx_id = args.rx_id
+    tx_id = args.tx_id
+    is_fd = args.fd_mode
+
+    print(f'Starting UDS Server: CAN interface - {can_channel}, Rx - {hex(rx_id)}, Tx - {hex(tx_id)}, FD - {is_fd}')
+
+    uds_server = UDSServer(
+        can_channel=can_channel,
+        rx_id=rx_id,
+        tx_id=tx_id,
+        is_fd=is_fd,
+    )
+
+    while not exit_flag.is_set():
+        uds_server.run()
+        time.sleep(0.1)
+
+    print('UDS Server stopped!')
+
+
+if __name__ == '__main__':
+    main()

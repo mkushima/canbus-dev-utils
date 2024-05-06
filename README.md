@@ -17,12 +17,17 @@ This Python project aims to provide developer tools for working with the SocketC
 - Install the package in editable mode: `python -m pip install -e .`
 
 ## Usage
+- Configure the SocketCAN
+```
+scripts/config-socketcan.sh --up -i 0 --virtual
+```
+
 - Start UDS Server
 ```
-uds_server -i vcan0 --rx_id 18DAEE4A --tx_id 18DA4AEE
+uds-server -ch vcan0 --rx_id 18DAEE4A --tx_id 18DA4AEE
 ```
 
 - Run UDS Client
 ```
-uds_client
+uds-client -ch vcan0 --rx_id 18DA4AEE --tx_id 18DAEE4A
 ```

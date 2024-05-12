@@ -24,10 +24,10 @@ scripts/config-socketcan.sh --up -i 0 --virtual
 
 - Start UDS Server
 ```
-uds-server -ch vcan0 --rx_id 18DAEE4A --tx_id 18DA4AEE
+uds_server -ch vcan0 --rx_id 18DAEE4A --tx_id 18DA4AEE
 ```
 
 - Run UDS Client
 ```
-uds-client -ch vcan0 --rx_id 18DA4AEE --tx_id 18DAEE4A
+uds_client -ch vcan0 --rx_id 18DA4AEE --tx_id 18DAEE4A
 ```

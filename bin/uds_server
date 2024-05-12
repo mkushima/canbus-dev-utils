@@ -7,10 +7,10 @@ that listens for incoming messages on a specified CAN (Controller Area Network)
 channel and responds accordingly.
 
 Usage:
-    uds-server.py -ch <CAN_CHANNEL> --rx_id <RX_ID> --tx_id <TX_ID> [-fd]
+    uds_server.py -ch <CAN_CHANNEL> --rx_id <RX_ID> --tx_id <TX_ID> [-fd]
 
 Example:
-    uds-server -ch vcan0 --rx_id 18DAEE4A --tx_id 18DA4AEE
+    uds_server -ch vcan0 --rx_id 18DAEE4A --tx_id 18DA4AEE
 
 Args:
     -ch, --can_channel: CAN channel interface
@@ -51,7 +51,7 @@ def get_args():
                 f"'{value}' is not a valid hexadecimal integer") from exc
 
     parser = argparse.ArgumentParser(
-        prog='uds-server',
+        prog='uds_server',
         description='UDS Server application'
     )
 

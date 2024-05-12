@@ -7,10 +7,10 @@ that communicates with a UDS Server over a specified CAN (Controller Area Networ
 channel.
 
 Usage:
-    uds-client.py -ch <CAN_CHANNEL> --rx_id <RX_ID> --tx_id <TX_ID>
+    uds_client.py -ch <CAN_CHANNEL> --rx_id <RX_ID> --tx_id <TX_ID>
 
 Example:
-    uds-client -ch vcan0 --rx_id 18DA4AEE --tx_id 18DAEE4A
+    uds_client -ch vcan0 --rx_id 18DA4AEE --tx_id 18DAEE4A
 
 Args:
     -ch, --can_channel: CAN channel interface
@@ -44,7 +44,7 @@ def get_args():
                 f"'{value}' is not a valid hexadecimal integer") from exc
 
     parser = argparse.ArgumentParser(
-        prog='uds-client',
+        prog='uds_client',
         description='UDS Client application'
     )
 

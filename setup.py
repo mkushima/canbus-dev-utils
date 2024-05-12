@@ -144,8 +144,8 @@ setup(
     # Entry points. The following would provide a command called `sample` which
     # executes the function `main` from this package when invoked:
     scripts=[
-        "bin/uds-server",
-        "bin/uds-client",
+        "bin/uds_server",
+        "bin/uds_client",
     ],
     # List additional URLs that are relevant to your project as a dict.
     #

@@ -1,27 +1,47 @@
 #!/usr/bin/env python3
+"""
+UDS Client Application
+
+This script sets up a UDS (Unified Diagnostic Services) Client application
+that communicates with a UDS Server over a specified CAN (Controller Area Network)
+channel.
+
+Usage:
+    uds-client.py -ch <CAN_CHANNEL> --rx_id <RX_ID> --tx_id <TX_ID>
+
+Example:
+    uds-client -ch vcan0 --rx_id 18DA4AEE --tx_id 18DAEE4A
+
+Args:
+    -ch, --can_channel: CAN channel interface
+    --rx_id: ID used for reception (in HEX)
+    --tx_id: ID used for transmission (in HEX)
+"""
 
 import argparse
+import os
 import can
 import isotp
-import os
 import udsoncan
 
-from logger import MyLogger
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.client import Client
 from udsoncan.configs import default_client_config
 
+from logger import MyLogger
 
 # Logger setup
 logger = MyLogger(os.path.basename(__file__))
 
 
 def get_args():
+    """Parse command line arguments."""
     def hex_int(value):
         try:
             return int(value, 16)
-        except ValueError:
-            raise argparse.ArgumentTypeError(f"'{value}' is not a valid hexadecimal integer")
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                f"'{value}' is not a valid hexadecimal integer") from exc
 
     parser = argparse.ArgumentParser(
         prog='uds-client',
@@ -53,6 +73,7 @@ def get_args():
 
 
 def main():
+    """Main function to start the UDS Client."""
     args = get_args()
 
     can_channel = args.can_channel
@@ -61,15 +82,15 @@ def main():
 
     # Refer to isotp documentation for full details about parameters
     isotp_params = {
-        'stmin' : 100,                         # Time between consecutive frame. 0-127ms or 100-900ns with values from 0xF1-0xF9
-        'blocksize' : 10,                      # Consecutives frames before sending a new flow control message
-        'wftmax' : 0,                          # Number of wait frame allowed before triggering an error
-        'tx_data_length' : 8,                  # Link layer (CAN layer) works with 8 byte payload (CAN 2.0)
-        'tx_data_min_length' : 8,              # Minimum length of CAN messages. When different from None, messages are padded to meet this length. Works with CAN 2.0 and CAN FD.
-        'tx_padding' : 0xAA,                   # Will pad all transmitted CAN messages with byte 0xAA.
-        'rx_flowcontrol_timeout' : 1000,       # Triggers a timeout if a flow control is awaited for more than 1000 milliseconds
-        'rx_consecutive_frame_timeout' : 1000, # Triggers a timeout if a consecutive frame is awaited for more than 1000 milliseconds
-        'max_frame_size' : 4095,               # Limit the size of receive frame.
+        'stmin' : 100, # Time between frames (0-127ms or 100-900ns, values from 0xF1-0xF9)
+        'blocksize' : 10, # Consecutives frames before sending a new flow control message
+        'wftmax' : 0, # Number of wait frame allowed before triggering an error
+        'tx_data_length' : 8, # Link layer (CAN layer) works with 8 byte payload (CAN 2.0)
+        'tx_data_min_length' : 8, # Min CAN message length, padded if not None to meet this length
+        'tx_padding' : 0xAA, # Will pad all transmitted CAN messages with byte 0xAA
+        'rx_flowcontrol_timeout' : 1000, # # Timeout for flow control (1000 ms)
+        'rx_consecutive_frame_timeout' : 1000, # Timeout for consecutive frames (1000 ms)
+        'max_frame_size' : 4095, # Limit the size of receive frame.
     }
 
     # Link Layer (CAN protocol)
@@ -91,13 +112,13 @@ def main():
         address=tp_addr,
         params=isotp_params,
     )
-    
+
     # interface between Application and Transport layer
     conn = PythonIsoTpConnection(stack)
 
     config = dict(default_client_config)
     config['data_identifiers'] = {
-        0xF190: udsoncan.AsciiCodec(17)       # Codec that read ASCII string. We must tell the length of the string
+        0xF190: udsoncan.AsciiCodec(17) # Codec that read ASCII string (length string is needed)
     }
 
     with Client(conn, request_timeout=2, config=config) as client:

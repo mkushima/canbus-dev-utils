@@ -1,8 +1,11 @@
-#!/usr/bin/env python3
-
+"""
+This module consolidates common structures, classes, and enums for
+the Unified Diagnostic Services (UDS) protocol, reducing redundancy throughout the codebase.
+"""
 from enum import Enum
 
 class ServiceID(Enum):
+    """An enumeration representing service IDs for UDS diagnostics."""
     DIAGNOSTIC_SESSION_CONTROL = 0x10
     ECU_RESET = 0x11
     READ_DATA_BY_IDENTIFIER = 0x22
@@ -19,4 +22,5 @@ class ServiceID(Enum):
     COMMUNICATION_CONTROL = 0x28
 
     def __str__(self):
+        """Return a hexadecimal string representation of the service ID."""
         return hex(self.value)

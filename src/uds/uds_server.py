@@ -1,5 +1,48 @@
-#!/usr/bin/env python3
+"""
+Module for managing Unified Diagnostic Services (UDS) requests.
 
+Classes:
+    UDSServer: Manages UDS requests over the CAN bus. Currently, it handles
+    only Read Data By Identifier and Write Data By Identifier.
+
+Usage:
+    To use the UDSServer class, instantiate it with the required parameters such as
+    the CAN channel (e.g.: vcan0), receive identifier (RX ID), and transmit identifier (TX ID).
+    Optionally, provide UDS data to be served.
+    Additional keyword arguments can be used to configure features like FD mode, padding,
+    Flow Control (FC) STmin, and Block Size (BS).
+    Once instantiated, call the 'run' method to start the main loop for processing UDS requests.
+
+Example:
+    # Import the UDSServer class from the module
+    from your_module_name import UDSServer
+
+    # Instantiate the UDSServer class with the required parameters
+    uds_server = UDSServer(can_channel="can0", rx_id=18DAEE4A, tx_id=0x18DA4AEE)
+
+    # Optionally, provide UDS data to be served
+    uds_data = {
+        0x1234: bytearray(b'\x01\x02\x03\x04'),
+        0x5678: bytearray(b'\x05\x06\x07\x08'),
+    }
+    uds_server = UDSServer(can_channel="can0", rx_id=18DAEE4A, tx_id=0x18DA4AEE, uds_data=uds_data)
+
+    # Additional keyword arguments can be used to configure additional features
+    uds_server = UDSServer(
+        can_channel="can0",
+        rx_id=18DAEE4A,
+        tx_id=0x18DA4AEE,
+        uds_data=uds_data,
+        is_fd=True,
+        padding=0xAA,
+        fc_stmin=10,
+        fc_bs=5
+    )
+
+    # Start the main loop for processing UDS requests
+    uds_server.run()
+"""
+import copy
 import isotp
 
 from logger import MyLogger
@@ -11,79 +54,180 @@ logger = MyLogger(__name__)
 
 
 class UDSServer:
-    dummy_data = {
-        0x2001: bytearray(b'\x01\x02\x03\x04\x05\x06\x07\x08'),
-        0x2002: bytearray(b'\x02\x02\x02'),
-        0x2003: 40 * bytearray(b'\x03'),
-        0x2004: 50 * bytearray(b'\x04'),
-        0x2005: 200 * bytearray(b'\x05'),
+    """
+    Class for managing Unified Diagnostic Services (UDS) requests.
+    """
+    DUMMY_DATA = {
+        0x0001: bytearray(b'\x01'),
+        0x0007: bytearray(b'\x07\x07\x07\x07\x07\x07\x07'),
+        0x0030: 200 * bytearray(b'\x30'),
         0xF190: bytearray('5YJSA1DG9DFP14705', 'utf-8'), # VIN
     }
 
-    def __init__(self, can_channel: str, rx_id: int, tx_id: int, is_fd: bool = False):
-        # Reference: https://readthedocs.org/projects/can-isotp/downloads/pdf/stable/
+    DEFAULT_TXPAD = 0xAA
+    DEFAULT_ST_MIN = 10 # ms
+    DEFAULT_BS = 5
+
+    def __init__(
+            self, can_channel: str, rx_id: int, tx_id: int, uds_data: dict = None,
+            **kwargs,
+        ):
+        """
+        Initialize the UDSServer instance.
+
+        Args:
+            can_channel (str): The CAN channel to bind the server to.
+            rx_id (int): The receive identifier (RX ID) for receiving ISO-TP frames.
+            tx_id (int): The transmit identifier (TX ID) for transmitting ISO-TP frames.
+            uds_data (dict, optional): Dict containing UDS data to be served. Defaults to None.
+            **kwargs: Additional keyword arguments:
+                is_fd (bool): Flag indicating whether FD mode is enabled. Defaults to False.
+                padding (int): The transmit padding byte value. Defaults to UDSServer.DEFAULT_TXPAD.
+                fc_stmin (int): The FC STmin value. Defaults to UDSServer.DEFAULT_ST_MIN.
+                fc_bs (int): The FC - Block Size (BS) value. Defaults to UDSServer.DEFAULT_BS.
+        """
+        if uds_data is None:
+            logger.warning("No 'UDS data' has been provided by user. Using dummy data!")
+            self.data = copy.deepcopy(UDSServer.DUMMY_DATA)
+        else:
+            self.data = uds_data
+
+        is_fd = kwargs.get('is_fd', False)
+        padding = kwargs.get('padding', UDSServer.DEFAULT_TXPAD)
+        fc_stmin = kwargs.get('fc_stmin', UDSServer.DEFAULT_ST_MIN)
+        fc_bs = kwargs.get('fc_bs', UDSServer.DEFAULT_BS)
+
+        logger.info(
+            "UDS Server config:" +
+            f"\n\tChannel = {can_channel}" +
+            f"\n\tRx ID = 0x{rx_id:X}" +
+            f"\n\tTx ID = 0x{tx_id:X}" +
+            f"\n\tPadding = 0x{padding:X}" +
+            f"\n\tFlow Control - STmin = {fc_stmin}" +
+            f"\n\tFlow Control - Block size = {fc_bs}"
+        )
+
+        # Setting a timeout to avoid getting stuck forever, while waiting for a request.
         self.server = isotp.socket(timeout=1)
 
         # Configure the Tx padding
-        self.server.set_opts(txpad=0xAA)
+        self.server.set_opts(txpad=padding)
 
         # Flow Control options
-        self.server.set_fc_opts(stmin=5, bs=10)
+        self.server.set_fc_opts(stmin=fc_stmin, bs=fc_bs)
 
         if is_fd:
-            # Link Layer options
-            # TODO: Check if `tx_flags=0x01` really enables the BRS
-            # Reference: https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/can.h#L160
-            # https://stackoverflow.com/questions/44851066/what-is-the-flags-field-for-in-canfd-frame-in-socketcan
-            self.server.set_ll_opts(mtu=isotp.socket.LinkLayerProtocol.CAN_FD, tx_dl=64, tx_flags=0x01)
+            logger.info("FD mode is enabled")
+            self.server.set_ll_opts(
+                mtu=isotp.socket.LinkLayerProtocol.CAN_FD,
+                tx_dl=64,
+                tx_flags=0x01,
+            )
 
-        isotp_address = isotp.Address(addressing_mode=isotp.AddressingMode.Normal_29bits, rxid=rx_id, txid=tx_id)
+        isotp_address = isotp.Address(
+            addressing_mode=isotp.AddressingMode.Normal_29bits,
+            rxid=rx_id,
+            txid=tx_id,
+        )
+
         self.server.bind(interface=can_channel, address=isotp_address)
 
         self.service_handlers = {
-            ServiceID.READ_DATA_BY_IDENTIFIER: lambda req: self._handle_read_data_by_id(req),
-            ServiceID.WRITE_DATA_BY_IDENTIFIER: lambda req: self._handle_write_data_by_id(req),
+            ServiceID.READ_DATA_BY_IDENTIFIER: self._handle_read_data_by_id,
+            ServiceID.WRITE_DATA_BY_IDENTIFIER: self._handle_write_data_by_id,
         }
 
-    def send_negative_response(self, rej_sid: int):
+    def run(self):
         """
-        Sending a Negative Response with NRC as General Reject
+        Main loop for running the UDSServer instance.
         """
-        isinstance(rej_sid, int)
+        try:
+            raw_request = self.server.recv()
+        except TimeoutError:
+            # Nothing has been received...
+            return
 
-        self.server.send(b'\x7F' + rej_sid.to_bytes(length=1, byteorder='big') + b'\x10')
+        # TODO: Check the size first...
+        try:
+            sid = ServiceID(UDSServer.get_sid(raw_request))
+        except ValueError:
+            logger.error(
+                f"Sending Negative Response - Unknown SID: {hex(UDSServer.get_sid(raw_request))}")
+            self._send_negative_response(UDSServer.get_sid(raw_request))
+            return
+
+        if sid not in self.service_handlers:
+            logger.error(f"Sending Negative Response - No handler found for SID: {hex(sid.value)}")
+            self._send_negative_response(sid.value)
+            return
+
+        self.service_handlers[sid](raw_request)
 
     @staticmethod
-    def get_did(payload):
-        return (payload[1] << 8) + payload[2]
+    def get_sid(raw_request):
+        """
+        Get the Service Identifier (SID) from a raw request.
 
-    def _handle_read_data_by_id(self, req):
-        did = UDSServer.get_did(req)
+        Args:
+            raw_request: The raw request data.
 
-        if did not in self.dummy_data:
+        Returns:
+            int: The Service Identifier (SID) extracted from the raw request.
+        """
+        return raw_request[0]
+
+    @staticmethod
+    def get_did(raw_request):
+        """
+        Get the Data Identifier (DID) from a raw request.
+
+        Args:
+            raw_request: The raw request data.
+
+        Returns:
+            int: The Data Identifier (DID) extracted from the raw request.
+        """
+        return (raw_request[1] << 8) + raw_request[2]
+
+    def _handle_read_data_by_id(self, raw_request):
+        """
+        Handle the Read Data By Identifier service.
+
+        Args:
+            raw_request: The raw request data.
+        """
+        did = UDSServer.get_did(raw_request)
+
+        if did not in self.data:
             logger.error(f'Sending Negative Response - SID: 0x22 - DID {hex(did)} not found')
             # TODO: Sending the proper NRC
-            self.send_negative_response(rej_sid=req[0])
+            self._send_negative_response(rej_sid=UDSServer.get_sid(raw_request))
             return
 
         logger.info(f'SID: 0x22 - Sending DID {hex(did)} content')
         self.server.send(
             b'\x62' +
             did.to_bytes(length=2, byteorder='big') +
-            self.dummy_data[did]
+            self.data[did]
         )
 
-    def _handle_write_data_by_id(self, req):
-        did = UDSServer.get_did(req)
+    def _handle_write_data_by_id(self, raw_request):
+        """
+        Handle the Write Data By Identifier service.
 
-        if did not in self.dummy_data:
+        Args:
+            raw_request: The raw request data.
+        """
+        did = UDSServer.get_did(raw_request)
+
+        if did not in self.data:
             logger.error(f'Sending Negative Response - SID: 0x2E - DID {hex(did)} not found')
             # TODO: Sending the proper NRC
-            self.send_negative_response(rej_sid=req[0])
+            self._send_negative_response(rej_sid=UDSServer.get_sid(raw_request))
             return
 
         logger.info(f'SID: 0x2E - Updating DID {hex(did)}')
-        self.dummy_data[did] = req[3:]
+        self.data[did] = raw_request[3:]
 
         # TODO: Check if this is the correct payload format
         self.server.send(
@@ -91,24 +235,13 @@ class UDSServer:
             did.to_bytes(length=2, byteorder='big')
         )
 
-    def run(self):
-        try:
-            req = self.server.recv()
-        except TimeoutError:
-            # Nothing has been received...
-            return
+    def _send_negative_response(self, rej_sid: int):
+        """
+        Sending a Negative Response with NRC as General Reject.
 
-        # TODO: Check the size first...
-        try:
-            sid = ServiceID(req[0])
-        except ValueError:
-            logger.error(f'Sending Negative Response - Unknown SID: {hex(req[0])}')
-            self.send_negative_response(req[0])
-            return
+        Args:
+            rej_sid (int): The Service Identifier (SID) for the negative response.
+        """
+        isinstance(rej_sid, int)
 
-        if sid not in self.service_handlers:
-            logger.error(f'Sending Negative Response - No handler found for SID: {hex(sid.value)}')
-            self.send_negative_response(sid.value)
-            return
-
-        self.service_handlers[sid](req)
+        self.server.send(b'\x7F' + rej_sid.to_bytes(length=1, byteorder='big') + b'\x10')

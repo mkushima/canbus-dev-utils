@@ -123,6 +123,7 @@ setup(
         "can-isotp==2.0.4",
         "udsoncan==1.23.0",
         "python-can==4.3.1",
+        "cantools==39.4.5",
     ],  # Optional
     # List additional groups of dependencies here (e.g. development
     # dependencies). Users will be able to install these using the "extras"
@@ -146,6 +147,7 @@ setup(
     scripts=[
         "bin/uds_server",
         "bin/uds_client",
+        "bin/send_can_msg",
     ],
     # List additional URLs that are relevant to your project as a dict.
     #

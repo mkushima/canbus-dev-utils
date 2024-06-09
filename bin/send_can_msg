@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""
+Send CAN messages based on PGNs and SPNs utility
+
+This script sends CAN messages with specified PGNs and SPNs using the provided DBC file.
+It can send messages either once or periodically, based on the specified timeout value.
+It expects a dictionary specifying the PGNs and their associated SPNs and values to be sent.
+
+Usage:
+    send_can_msg.py -ch can0 --dbc my_database.dbc -t 10 
+    "{ 'EEC1': { 'EngSpeed': 1610.87 }, 
+       'CCVS': { 'WheelBasedVehicleSpeed': 54.7, 'CruiseCtrlSetSpeed': 55 } }"
+"""
+
+import argparse
+import ast
+import os
+import time
+
+import cantools
+import can
+
+from logger import MyLogger
+
+# Logger setup
+logger = MyLogger(os.path.basename(__file__))
+
+
+def get_args():
+    """Parse command line arguments."""
+    def str2dict(value):
+        try:
+            result = ast.literal_eval(value)
+            if not isinstance(result, dict):
+                raise ValueError
+            return result
+        except (ValueError, SyntaxError) as exc:
+            raise argparse.ArgumentTypeError(
+                f"'{value}' is not a valid dictionary") from exc
+
+    parser = argparse.ArgumentParser(
+        prog='send_can_msg',
+        description='Send CAN messages with specified PGNs and SPNs',
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+
+    parser.add_argument(
+        "-ch", "--can_channel",
+        help="CAN channel interface",
+        required=True,
+        type=str
+    )
+
+    parser.add_argument(
+        "--dbc",
+        help="Path to a DBC file",
+        required=True,
+        type=str
+    )
+
+    parser.add_argument(
+        "-t", "--timeout",
+        help="If a timeout is set, then it sends the CAN messages periodically.",
+        required=False,
+        type=int
+    )
+
+    parser.add_argument(
+        "data",
+        help=(
+            "Dictionary specifying the PGNs and their associated SPNs and values to be sent.\n\n"
+            "Format:\n"
+            "  {\n"
+            "    PGN_1: {SPN_1: value, SPN_2: value, ...},\n"
+            "    PGN_2: {SPN_1: value, SPN_2: value, ...},\n"
+            "    ...\n"
+            "  }\n\n"
+            "Where:\n"
+            "  PGN - Parameter Group Number (primary key)\n"
+            "  SPN - Suspect Parameter Number (secondary key)\n"
+            "  value - The value associated with the SPN\n\n"
+            "Example:\n"
+            "  python send_can_msg.py \"{ 'EEC1\' : { 'EngSpeed': 1610.87, }, \
+'CCVS' : { 'WheelBasedVehicleSpeed' : 54.7, 'CruiseCtrlSetSpeed': 55, } }\""
+        ),
+        type=str2dict
+    )
+
+    return parser.parse_args()
+
+
+def get_max_signal_values(message):
+    """Create a dictonary with signal names and their maximum values."""
+    signal_values = {}
+    for signal in message.signals:
+        if signal.is_signed:
+            max_value = (2 ** (signal.length - 1)) -1
+        else:
+            max_value = (2 ** signal.length) - 1
+
+        signal_values[signal.name] = max_value
+
+    return signal_values
+
+
+def main():
+    """Main function to start CAN data transmission."""
+    args = get_args()
+
+    can_channel = args.can_channel
+    dbc = args.dbc
+    data = args.data
+    timeout = args.timeout
+
+    db = cantools.database.load_file(dbc)
+
+    can_bus = can.ThreadSafeBus(channel=can_channel, interface='socketcan')
+    # can_bus = can.interface.Bus(channel=can_channel, interface='socketcan')
+
+    for pgn_name, spn_pack in data.items():
+        logger.info(f'Setup of PGN "{pgn_name}"')
+
+        msg_dbc = db.get_message_by_name(pgn_name)
+
+        signal_values = get_max_signal_values(msg_dbc)
+
+        for spn_name, value in spn_pack.items():
+            logger.info(f'Setting SPN "{spn_name}" to {value}')
+
+            signal_values[spn_name] = msg_dbc.get_signal_by_name(spn_name).scaled_to_raw(value)
+
+        data = msg_dbc.encode(data=signal_values, scaling=False, strict=False)
+
+        msg_can = can.Message(arbitration_id=msg_dbc.frame_id, data=data)
+
+        logger.info(f'Sending "{pgn_name}" ({hex(msg_dbc.frame_id)})')
+
+        if timeout:
+            logger.info(f'Cycle time {msg_dbc.cycle_time / 1000.0} sec')
+            can_bus.send_periodic(msg_can, msg_dbc.cycle_time / 1000.0)
+        else:
+            can_bus.send(msg_can)
+
+    if timeout:
+        logger.info(f'Periodic transmission enabled for {timeout} sec')
+        time.sleep(timeout)
+
+    can_bus.shutdown()
+
+
+if __name__ == '__main__':
+    main()

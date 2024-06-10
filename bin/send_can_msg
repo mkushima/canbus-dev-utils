@@ -19,6 +19,7 @@ import time
 
 import cantools
 import can
+import j1939
 
 from logger import MyLogger
 
@@ -66,6 +67,12 @@ def get_args():
     )
 
     parser.add_argument(
+        "--j1939",
+        help="Use J1939 module",
+        action='store_true'
+    )
+
+    parser.add_argument(
         "data",
         help=(
             "Dictionary specifying the PGNs and their associated SPNs and values to be sent.\n\n"
@@ -103,16 +110,9 @@ def get_max_signal_values(message):
     return signal_values
 
 
-def main():
-    """Main function to start CAN data transmission."""
-    args = get_args()
-
-    can_channel = args.can_channel
-    dbc = args.dbc
-    data = args.data
-    timeout = args.timeout
-
-    db = cantools.database.load_file(dbc)
+def standard_send(can_channel, db, data, timeout):
+    """Send CAN data using python-can module."""
+    logger.info("Send CAN data using python-can module")
 
     can_bus = can.ThreadSafeBus(channel=can_channel, interface='socketcan')
     # can_bus = can.interface.Bus(channel=can_channel, interface='socketcan')
@@ -146,6 +146,166 @@ def main():
         time.sleep(timeout)
 
     can_bus.shutdown()
+
+
+def j1939_send(can_channel, db, data, timeout):
+    """Send CAN data using j1939 module."""
+    logger.info("Send CAN data using j1939 module")
+
+    class DummyJ1939ECU:
+        """Just a dummy ECU that uses j1939 module for sending CAN data."""
+        DEFAULT_SA = 0x00
+
+        def __init__(self, channel, sa_preferred=DEFAULT_SA) -> None:
+            self._channel = channel
+            self._sa_preferred = sa_preferred
+
+            self._ca_name = j1939.Name(
+                arbitrary_address_capable=0,
+                industry_group=j1939.Name.IndustryGroup.Industrial,
+                vehicle_system_instance=1,
+                vehicle_system=1,
+                function=1,
+                function_instance=1,
+                ecu_instance=1,
+                manufacturer_code=666,
+                identity_number=1234567
+            )
+
+            self._ca = j1939.ControllerApplication(
+                self._ca_name,
+                self._sa_preferred,
+            )
+
+            self._ecu = j1939.ElectronicControlUnit()
+
+            self._ecu.connect(
+                bustype='socketcan',
+                channel=self._channel,
+            )
+
+            self._ecu.add_ca(controller_application=self._ca)
+
+        def start_ca(self):
+            """Start Controller Application"""
+            self._ca.start()
+
+        def stop_and_disconnect(self):
+            """Stop Controller Application and disconnect from CAN bus"""
+            self._ca.stop()
+            self._ecu.disconnect()
+
+        def add_send_cb(self, period, pgn, data):
+            """Add a callback for sending message
+
+            Parameters:
+            period (float): Transmission rate in second
+            pgn (FrameId): PGN to be sent
+            data (bytearray): Payload to be sent
+            """
+
+            def cb(_cookie):
+                """Callback for sending message
+
+                Parameters:
+                A cookie registered at 'add_timer'. May be None.
+                """
+                # wait until we have our device_address
+                if self._ca.state != j1939.ControllerApplication.State.NORMAL:
+                    # returning true keeps the timer event active
+                    return True
+
+                self._ca.send_pgn(
+                    data_page=pgn.data_page,
+                    pdu_format=pgn.pdu_format,
+                    pdu_specific=pgn.pdu_specific,
+                    priority=pgn.priority,
+                    data=data,
+                )
+
+                # returning true keeps the timer event active
+                return True
+
+            self._ca.add_timer(period, cb)
+
+        def send(self, pgn, data):
+            """Send a CAN message
+
+            Parameters:
+            pgn (FrameId): PGN to be sent
+            data (bytearray): Payload to be sent
+            """
+            self._ca.send_pgn(
+                data_page=pgn.data_page,
+                pdu_format=pgn.pdu_format,
+                pdu_specific=pgn.pdu_specific,
+                priority=pgn.priority,
+                data=data,
+            )
+
+    dummy_ecu = DummyJ1939ECU(channel=can_channel)
+
+    logger.info('Start the CA and wait 5 seconds for the address claiming to complete')
+    dummy_ecu.start_ca()
+    time.sleep(5)
+
+    for pgn_name, spn_pack in data.items():
+        logger.info(f'Setup of PGN "{pgn_name}"')
+
+        msg_dbc = db.get_message_by_name(pgn_name)
+
+        signal_values = get_max_signal_values(msg_dbc)
+
+        for spn_name, value in spn_pack.items():
+            logger.info(f'Setting SPN "{spn_name}" to {value}')
+
+            signal_values[spn_name] = msg_dbc.get_signal_by_name(spn_name).scaled_to_raw(value)
+
+        data = msg_dbc.encode(data=signal_values, scaling=False, strict=False)
+
+        # FIXME: VIN case
+        # "{ 'VI' : { 'VehicleIdentificationNumber': '1XKYDP9X7FJ469058*', }, }"
+        # data = list(map(ord, spn_pack['VehicleIdentificationNumber']))
+
+        logger.info(f'Sending "{pgn_name}" ({hex(msg_dbc.frame_id)})')
+
+        if timeout:
+            logger.info(f'Cycle time {msg_dbc.cycle_time / 1000.0} sec')
+            dummy_ecu.add_send_cb(
+                period=(msg_dbc.cycle_time / 1000.0),
+                pgn=cantools.j1939.frame_id_unpack(msg_dbc.frame_id),
+                data=data
+            )
+        else:
+            dummy_ecu.send(
+                pgn=cantools.j1939.frame_id_unpack(msg_dbc.frame_id),
+                data=data
+            )
+
+    if timeout:
+        logger.info(f'Periodic transmission enabled for {timeout} sec')
+        time.sleep(timeout)
+
+    dummy_ecu.stop_and_disconnect()
+
+
+def main():
+    """Main function to start CAN data transmission."""
+    args = get_args()
+
+    can_channel = args.can_channel
+    dbc = args.dbc
+    data = args.data
+    timeout = args.timeout
+
+    send_func = j1939_send if args.j1939 else standard_send
+
+    send_func(
+        can_channel=can_channel,
+        db=cantools.database.load_file(dbc),
+        data=data,
+        timeout=timeout,
+    )
 
 
 if __name__ == '__main__':

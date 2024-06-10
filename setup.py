@@ -124,6 +124,7 @@ setup(
         "udsoncan==1.23.0",
         "python-can==4.3.1",
         "cantools==39.4.5",
+        "can-j1939==2.0.12",
     ],  # Optional
     # List additional groups of dependencies here (e.g. development
     # dependencies). Users will be able to install these using the "extras"
